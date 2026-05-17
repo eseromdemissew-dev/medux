@@ -89,10 +89,13 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
   useEffect(() => {
-    // Restore theme
     if (typeof document !== "undefined") {
       const t = localStorage.getItem("medux-theme") || "dark";
       document.documentElement.classList.toggle("dark", t === "dark");
+    }
+    // Register service worker for push notifications
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
     }
     const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
       router.invalidate();
