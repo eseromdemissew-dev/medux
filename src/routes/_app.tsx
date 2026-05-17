@@ -1,11 +1,16 @@
 import { createFileRoute, Outlet, Link, useNavigate, useLocation, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { MeduxLogo } from "@/components/MeduxLogo";
-import { LayoutDashboard, Users, PhoneCall, MessageSquare, Settings, LogOut, Sun, Moon, Bell } from "lucide-react";
+import { LayoutDashboard, Users, PhoneCall, MessageSquare, Settings, LogOut, Sun, Moon, Bell, BellRing } from "lucide-react";
 import { useAuth, useTheme } from "@/hooks/useAuth";
 import { initials } from "@/lib/medux";
+import { IncomingCallRinger } from "@/components/IncomingCallRinger";
+import { Badge, useUnreadCounts } from "@/components/NotifBadges";
+import { enablePushNotifications, registerServiceWorker } from "@/lib/push.client";
+import { getPushConfig } from "@/lib/calls.functions";
 
 export const Route = createFileRoute("/_app")({
   beforeLoad: async () => {
@@ -15,26 +20,26 @@ export const Route = createFileRoute("/_app")({
   component: AppLayout,
 });
 
-const NAV = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/contacts", label: "Contacts", icon: Users },
-  { to: "/calls", label: "Calls", icon: PhoneCall },
-  { to: "/messages", label: "Messages", icon: MessageSquare },
-  { to: "/settings", label: "Settings", icon: Settings },
-] as const;
-
 function AppLayout() {
   const { user } = useAuth();
   const { theme, toggle } = useTheme();
   const nav = useNavigate();
   const loc = useLocation();
   const [profile, setProfile] = useState<{ full_name: string | null; avatar_url: string | null; username: string | null } | null>(null);
+  const { unreadMessages, missedCalls, total } = useUnreadCounts();
+  const [pushReady, setPushReady] = useState(false);
+
+  const NAV = [
+    { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, count: 0 },
+    { to: "/contacts", label: "Contacts", icon: Users, count: 0 },
+    { to: "/calls", label: "Calls", icon: PhoneCall, count: missedCalls },
+    { to: "/messages", label: "Messages", icon: MessageSquare, count: unreadMessages },
+    { to: "/settings", label: "Settings", icon: Settings, count: 0 },
+  ] as const;
 
   useEffect(() => {
     if (!user) return;
     supabase.from("profiles").select("full_name, avatar_url, username").eq("id", user.id).maybeSingle().then(({ data }) => setProfile(data));
-
-    // Update presence
     supabase.from("profiles").update({ online_status: "online", last_seen: new Date().toISOString() }).eq("id", user.id).then(() => {});
     const interval = setInterval(() => {
       supabase.from("profiles").update({ last_seen: new Date().toISOString() }).eq("id", user.id).then(() => {});
@@ -46,16 +51,32 @@ function AppLayout() {
     return () => { clearInterval(interval); window.removeEventListener("beforeunload", handleUnload); handleUnload(); };
   }, [user]);
 
-  // Listen for incoming calls (insert on calls where callee_id = me)
   useEffect(() => {
-    if (!user) return;
-    const ch = supabase.channel(`incoming-${user.id}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "calls", filter: `callee_id=eq.${user.id}` }, (payload) => {
-        const call = payload.new as { id: string; status: string; room_id: string };
-        if (call.status === "ringing") nav({ to: "/call/$callId", params: { callId: call.id } });
-      }).subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [user, nav]);
+    registerServiceWorker().then(async () => {
+      if (typeof window === "undefined") return;
+      if ("Notification" in window && Notification.permission === "granted") {
+        const { vapidPublicKey } = await getPushConfig();
+        if (vapidPublicKey) {
+          const ok = await enablePushNotifications(vapidPublicKey);
+          setPushReady(ok);
+        }
+      }
+    });
+  }, []);
+
+  async function enablePush() {
+    const { vapidPublicKey } = await getPushConfig();
+    if (!vapidPublicKey) { toast.error("Push not configured"); return; }
+    const ok = await enablePushNotifications(vapidPublicKey);
+    if (ok) { setPushReady(true); toast.success("Push notifications enabled"); }
+    else toast.error("Permission denied or not supported");
+  }
+
+  // Update browser tab title with unread count
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.title = total > 0 ? `(${total}) Medux — Connect. Clearly.` : "Medux — Connect. Clearly.";
+  }, [total]);
 
   async function logout() {
     await supabase.auth.signOut();
@@ -75,7 +96,8 @@ function AppLayout() {
                   <motion.div layoutId="active-pill" className="absolute inset-0 gradient-brand rounded-xl shadow-glow" transition={{ type: "spring", stiffness: 400, damping: 30 }} />
                 )}
                 <span className={`relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${active ? "text-white" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"}`}>
-                  <n.icon className="h-4 w-4" />{n.label}
+                  <span className="relative"><n.icon className="h-4 w-4" /><Badge count={n.count} /></span>
+                  {n.label}
                 </span>
               </Link>
             );
@@ -86,6 +108,11 @@ function AppLayout() {
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             {theme === "dark" ? "Light mode" : "Dark mode"}
           </button>
+          {!pushReady && (
+            <button onClick={enablePush} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-primary hover:bg-accent/50">
+              <BellRing className="h-4 w-4" /> Enable push
+            </button>
+          )}
           <Link to="/profile" className="flex items-center gap-3 rounded-xl glass p-2.5 hover:scale-[1.02] transition">
             <div className="grid h-9 w-9 place-items-center rounded-full gradient-brand text-sm font-semibold text-white">
               {profile?.avatar_url ? <img src={profile.avatar_url} className="h-full w-full rounded-full object-cover" alt="" /> : initials(profile?.full_name)}
@@ -106,7 +133,9 @@ function AppLayout() {
           <Link to="/dashboard" className="md:hidden"><MeduxLogo size={28} /></Link>
           <div />
           <div className="flex items-center gap-2">
-            <button className="grid h-9 w-9 place-items-center rounded-full glass"><Bell className="h-4 w-4" /></button>
+            <Link to="/messages" className="relative grid h-9 w-9 place-items-center rounded-full glass">
+              <Bell className="h-4 w-4" /><Badge count={total} />
+            </Link>
             <button onClick={toggle} className="grid h-9 w-9 place-items-center rounded-full glass md:hidden">
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
@@ -123,11 +152,14 @@ function AppLayout() {
           const active = loc.pathname.startsWith(n.to);
           return (
             <Link key={n.to} to={n.to} className={`flex flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-xs ${active ? "text-primary" : "text-muted-foreground"}`}>
-              <n.icon className="h-5 w-5" />{n.label}
+              <span className="relative"><n.icon className="h-5 w-5" /><Badge count={n.count} /></span>{n.label}
             </Link>
           );
         })}
       </nav>
+
+      {/* Global incoming-call ringer (works on every authenticated page) */}
+      <IncomingCallRinger />
     </div>
   );
 }
