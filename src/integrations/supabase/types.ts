@@ -14,38 +14,79 @@ export type Database = {
   }
   public: {
     Tables: {
+      call_participants: {
+        Row: {
+          call_id: string
+          id: string
+          joined_at: string
+          left_at: string | null
+          user_id: string
+        }
+        Insert: {
+          call_id: string
+          id?: string
+          joined_at?: string
+          left_at?: string | null
+          user_id: string
+        }
+        Update: {
+          call_id?: string
+          id?: string
+          joined_at?: string
+          left_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_participants_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "calls"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       calls: {
         Row: {
-          callee_id: string
+          callee_id: string | null
           created_at: string
           duration_seconds: number | null
           ended_at: string | null
+          host_id: string | null
           id: string
           initiator_id: string
+          invite_code: string | null
+          is_group: boolean
           room_id: string
           started_at: string
           status: string
           type: string
         }
         Insert: {
-          callee_id: string
+          callee_id?: string | null
           created_at?: string
           duration_seconds?: number | null
           ended_at?: string | null
+          host_id?: string | null
           id?: string
           initiator_id: string
+          invite_code?: string | null
+          is_group?: boolean
           room_id: string
           started_at?: string
           status?: string
           type?: string
         }
         Update: {
-          callee_id?: string
+          callee_id?: string | null
           created_at?: string
           duration_seconds?: number | null
           ended_at?: string | null
+          host_id?: string | null
           id?: string
           initiator_id?: string
+          invite_code?: string | null
+          is_group?: boolean
           room_id?: string
           started_at?: string
           status?: string
@@ -223,6 +264,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      generate_invite_code: { Args: never; Returns: string }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
