@@ -6,7 +6,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { fmtDuration, initials, Ringtone } from "@/lib/medux";
 import { MeduxLogo } from "@/components/MeduxLogo";
-import { Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, Phone, Monitor, Maximize } from "lucide-react";
+import { joinCall } from "@/lib/calls.functions";
+import { askMeduxAI, translateToAmharic } from "@/lib/ai.functions";
+import {
+  Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, Phone, Monitor, Maximize,
+  Copy, Link as LinkIcon, Sparkles, Languages, X, Send,
+} from "lucide-react";
 
 export const Route = createFileRoute("/call/$callId")({
   head: () => ({ meta: [{ title: "Call — Medux" }] }),
@@ -15,58 +20,70 @@ export const Route = createFileRoute("/call/$callId")({
 
 interface CallRow {
   id: string; room_id: string; type: string; status: string;
-  initiator_id: string; callee_id: string; started_at: string; duration_seconds: number | null;
+  initiator_id: string; callee_id: string | null;
+  is_group: boolean; invite_code: string | null; host_id: string;
+  started_at: string; duration_seconds: number | null;
 }
 interface Profile { id: string; full_name: string | null; avatar_url: string | null; }
 
 const ICE = { iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }] };
+
+interface PeerState { pc: RTCPeerConnection; stream?: MediaStream; profile?: Profile; }
+
+// SpeechRecognition typings
+type SRConstructor = new () => SpeechRecognition;
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean; interimResults: boolean; lang: string;
+  start(): void; stop(): void;
+  onresult: ((ev: { results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }> }) => void) | null;
+  onerror: ((ev: unknown) => void) | null;
+  onend: (() => void) | null;
+}
 
 function CallScreen() {
   const { callId } = Route.useParams();
   const { user } = useAuth();
   const nav = useNavigate();
   const [call, setCall] = useState<CallRow | null>(null);
-  const [other, setOther] = useState<Profile | null>(null);
+  const [peers, setPeers] = useState<Record<string, PeerState>>({});
+  const peersRef = useRef<Record<string, PeerState>>({});
   const [muted, setMuted] = useState(false);
   const [camOff, setCamOff] = useState(false);
   const [seconds, setSeconds] = useState(0);
-  const [connected, setConnected] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
+  const [showAI, setShowAI] = useState(false);
+  const [subtitlesOn, setSubtitlesOn] = useState(false);
+  const [subtitle, setSubtitle] = useState<{ en: string; am: string }>({ en: "", am: "" });
   const localRef = useRef<HTMLVideoElement>(null);
-  const remoteRef = useRef<HTMLVideoElement>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const ringtoneRef = useRef<Ringtone | null>(null);
   const timerRef = useRef<number | null>(null);
+  const speechRef = useRef<SpeechRecognition | null>(null);
 
-  const isInitiator = user?.id === call?.initiator_id;
-  const incoming = !isInitiator && call?.status === "ringing";
+  const isInitiator = !!user && !!call && user.id === call.initiator_id;
+  const incoming = !!call && !call.is_group && !isInitiator && call.status === "ringing";
 
-  // Load call + other party
+  // Load call
   useEffect(() => {
     if (!user) return;
     (async () => {
       const { data } = await supabase.from("calls").select("*").eq("id", callId).maybeSingle();
       if (!data) { toast.error("Call not found"); nav({ to: "/dashboard" }); return; }
-      const c = data as CallRow;
-      setCall(c);
-      const otherId = c.initiator_id === user.id ? c.callee_id : c.initiator_id;
-      const { data: p } = await supabase.from("profiles").select("id, full_name, avatar_url").eq("id", otherId).maybeSingle();
-      setOther(p as Profile);
+      setCall(data as CallRow);
     })();
   }, [callId, user, nav]);
 
-  // Ringtone for incoming call
+  // Ringtone for incoming 1:1
   useEffect(() => {
     if (incoming) {
       const r = new Ringtone();
-      ringtoneRef.current = r;
-      r.start();
+      ringtoneRef.current = r; r.start();
       return () => r.stop();
     }
   }, [incoming]);
 
-  // Subscribe to call status changes
+  // Listen for status changes
   useEffect(() => {
     if (!call) return;
     const ch = supabase.channel(`call-status-${call.id}`)
@@ -75,143 +92,217 @@ function CallScreen() {
         setCall(updated);
         if (updated.status === "ended" || updated.status === "declined") {
           cleanup();
-          setTimeout(() => nav({ to: "/calls" }), 1500);
+          setTimeout(() => nav({ to: "/calls" }), 1200);
         }
       }).subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [call?.id, nav]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [call?.id]);
 
   const cleanup = useCallback(() => {
     ringtoneRef.current?.stop();
     if (timerRef.current) clearInterval(timerRef.current);
-    pcRef.current?.close();
-    pcRef.current = null;
+    Object.values(peersRef.current).forEach((p) => p.pc.close());
+    peersRef.current = {};
+    setPeers({});
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
     if (channelRef.current) supabase.removeChannel(channelRef.current);
     channelRef.current = null;
+    speechRef.current?.stop?.();
+    speechRef.current = null;
   }, []);
 
   useEffect(() => () => cleanup(), [cleanup]);
 
-  // Setup WebRTC after call is active (or when initiator starts)
-  const startWebRTC = useCallback(async () => {
-    if (!call || !user || pcRef.current) return;
+  // Create / get a peer connection for a specific remote user
+  const getPeer = useCallback((peerId: string): RTCPeerConnection => {
+    if (peersRef.current[peerId]) return peersRef.current[peerId].pc;
     const pc = new RTCPeerConnection(ICE);
-    pcRef.current = pc;
+    peersRef.current[peerId] = { pc };
+    setPeers({ ...peersRef.current });
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: call.type === "video",
-      audio: { echoCancellation: true, noiseSuppression: true },
-    });
-    localStreamRef.current = stream;
-    if (localRef.current) localRef.current.srcObject = stream;
-    stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+    localStreamRef.current?.getTracks().forEach((t) => pc.addTrack(t, localStreamRef.current!));
 
     pc.ontrack = (e) => {
-      if (remoteRef.current) {
-        remoteRef.current.srcObject = e.streams[0];
-        setConnected(true);
-        if (!timerRef.current) {
-          timerRef.current = window.setInterval(() => setSeconds((s) => s + 1), 1000);
-        }
-      }
+      peersRef.current[peerId] = { ...peersRef.current[peerId], stream: e.streams[0] };
+      setPeers({ ...peersRef.current });
+      if (!timerRef.current) timerRef.current = window.setInterval(() => setSeconds((s) => s + 1), 1000);
     };
-
-    const ch = supabase.channel(`webrtc-${call.room_id}`, { config: { broadcast: { self: false } } });
-    channelRef.current = ch;
 
     pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        ch.send({ type: "broadcast", event: "ice", payload: { from: user.id, candidate: e.candidate } });
+      if (e.candidate && channelRef.current && user) {
+        channelRef.current.send({ type: "broadcast", event: "ice", payload: { from: user.id, to: peerId, candidate: e.candidate } });
       }
     };
 
-    ch.on("broadcast", { event: "ice" }, ({ payload }) => {
-      if (payload.from !== user.id && payload.candidate) {
-        pc.addIceCandidate(new RTCIceCandidate(payload.candidate)).catch(() => {});
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "failed" || pc.connectionState === "closed" || pc.connectionState === "disconnected") {
+        const cur = peersRef.current[peerId];
+        if (cur) { cur.pc.close(); delete peersRef.current[peerId]; setPeers({ ...peersRef.current }); }
+      }
+    };
+
+    // Fetch profile lazily
+    supabase.from("profiles").select("id, full_name, avatar_url").eq("id", peerId).maybeSingle().then(({ data }) => {
+      if (data && peersRef.current[peerId]) {
+        peersRef.current[peerId] = { ...peersRef.current[peerId], profile: data as Profile };
+        setPeers({ ...peersRef.current });
       }
     });
+
+    return pc;
+  }, [user]);
+
+  // Start WebRTC (mesh) — invoked once we have media + call is active
+  const startMesh = useCallback(async () => {
+    if (!call || !user || channelRef.current) return;
+
+    // Acquire media
+    if (!localStreamRef.current) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: call.type === "video",
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+        localStreamRef.current = stream;
+        if (localRef.current) localRef.current.srcObject = stream;
+      } catch {
+        toast.error("Camera/mic permission denied");
+        nav({ to: "/calls" }); return;
+      }
+    }
+
+    // Record participation
+    joinCall({ data: { callId: call.id } }).catch(() => {});
+
+    const ch = supabase.channel(`webrtc-${call.room_id}`, { config: { broadcast: { self: false }, presence: { key: user.id } } });
+    channelRef.current = ch;
+
+    ch.on("broadcast", { event: "hello" }, async ({ payload }) => {
+      const peerId = payload.from as string;
+      if (peerId === user.id) return;
+      // Tie-break: only the lower id initiates the offer to avoid glare
+      if (user.id < peerId) {
+        const pc = getPeer(peerId);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        ch.send({ type: "broadcast", event: "sdp", payload: { from: user.id, to: peerId, type: "offer", sdp: offer } });
+      }
+    });
+
     ch.on("broadcast", { event: "sdp" }, async ({ payload }) => {
-      if (payload.from === user.id) return;
+      if (payload.to !== user.id) return;
+      const pc = getPeer(payload.from);
       if (payload.type === "offer") {
         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        ch.send({ type: "broadcast", event: "sdp", payload: { from: user.id, type: "answer", sdp: answer } });
+        ch.send({ type: "broadcast", event: "sdp", payload: { from: user.id, to: payload.from, type: "answer", sdp: answer } });
       } else if (payload.type === "answer") {
         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
       }
     });
 
+    ch.on("broadcast", { event: "ice" }, ({ payload }) => {
+      if (payload.to !== user.id) return;
+      const pc = getPeer(payload.from);
+      pc.addIceCandidate(new RTCIceCandidate(payload.candidate)).catch(() => {});
+    });
+
     await ch.subscribe(async (status) => {
-      if (status === "SUBSCRIBED" && isInitiator) {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        ch.send({ type: "broadcast", event: "sdp", payload: { from: user.id, type: "offer", sdp: offer } });
+      if (status === "SUBSCRIBED") {
+        ch.send({ type: "broadcast", event: "hello", payload: { from: user.id } });
       }
     });
-  }, [call, user, isInitiator]);
+  }, [call, user, getPeer, nav]);
 
-  // Initiator starts WebRTC immediately; callee starts after answering
+  // Auto-start mesh: initiator immediately; callee after accept; group on load
   useEffect(() => {
-    if (call && isInitiator && (call.status === "ringing" || call.status === "active")) {
-      startWebRTC();
-    }
-    if (call && !isInitiator && call.status === "active") {
-      startWebRTC();
-    }
-  }, [call?.status, isInitiator, startWebRTC]);
+    if (!call || !user) return;
+    if (call.is_group) { startMesh(); return; }
+    if (isInitiator && (call.status === "ringing" || call.status === "active")) { startMesh(); return; }
+    if (!isInitiator && call.status === "active") { startMesh(); return; }
+  }, [call?.status, call?.is_group, isInitiator, startMesh, user, call]);
+
+  // ---- Subtitles + translation ----
+  useEffect(() => {
+    if (!subtitlesOn) { speechRef.current?.stop?.(); speechRef.current = null; return; }
+    const SR = (window as unknown as { SpeechRecognition?: SRConstructor; webkitSpeechRecognition?: SRConstructor }).SpeechRecognition
+      || (window as unknown as { webkitSpeechRecognition?: SRConstructor }).webkitSpeechRecognition;
+    if (!SR) { toast.error("Live subtitles need Chrome/Edge"); setSubtitlesOn(false); return; }
+    const sr = new SR();
+    sr.continuous = true; sr.interimResults = true; sr.lang = "en-US";
+    sr.onresult = async (e) => {
+      const last = e.results[e.results.length - 1];
+      const text = last[0].transcript.trim();
+      if (!text) return;
+      setSubtitle((s) => ({ ...s, en: text }));
+      if (last.isFinal) {
+        try {
+          const { translation } = await translateToAmharic({ data: { text } });
+          setSubtitle({ en: text, am: translation });
+        } catch { /* skip */ }
+      }
+    };
+    sr.onerror = () => { /* keep going */ };
+    sr.onend = () => { if (subtitlesOn) try { sr.start(); } catch { /* noop */ } };
+    try { sr.start(); } catch { /* noop */ }
+    speechRef.current = sr;
+    return () => { sr.stop(); speechRef.current = null; };
+  }, [subtitlesOn]);
 
   async function answerCall() {
     if (!call) return;
     ringtoneRef.current?.stop();
     await supabase.from("calls").update({ status: "active" }).eq("id", call.id);
   }
-
   async function declineCall() {
     if (!call) return;
     ringtoneRef.current?.stop();
     await supabase.from("calls").update({ status: "declined", ended_at: new Date().toISOString() }).eq("id", call.id);
   }
-
   async function endCall() {
     if (!call) return;
-    const dur = seconds;
-    await supabase.from("calls").update({ status: "ended", ended_at: new Date().toISOString(), duration_seconds: dur }).eq("id", call.id);
-    cleanup();
-    nav({ to: "/calls" });
+    if (call.is_group) {
+      // Just leave; others continue
+      cleanup(); nav({ to: "/calls" }); return;
+    }
+    await supabase.from("calls").update({ status: "ended", ended_at: new Date().toISOString(), duration_seconds: seconds }).eq("id", call.id);
+    cleanup(); nav({ to: "/calls" });
   }
-
   function toggleMute() {
-    const next = !muted;
-    setMuted(next);
+    const next = !muted; setMuted(next);
     localStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !next));
   }
   function toggleCam() {
-    const next = !camOff;
-    setCamOff(next);
+    const next = !camOff; setCamOff(next);
     localStreamRef.current?.getVideoTracks().forEach((t) => (t.enabled = !next));
   }
-
   async function shareScreen() {
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
       const screenTrack = screenStream.getVideoTracks()[0];
-      const sender = pcRef.current?.getSenders().find((s) => s.track?.kind === "video");
-      if (sender) await sender.replaceTrack(screenTrack);
-      screenTrack.onended = async () => {
+      Object.values(peersRef.current).forEach(({ pc }) => {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+        sender?.replaceTrack(screenTrack);
+      });
+      screenTrack.onended = () => {
         const camTrack = localStreamRef.current?.getVideoTracks()[0];
-        if (sender && camTrack) await sender.replaceTrack(camTrack);
+        if (!camTrack) return;
+        Object.values(peersRef.current).forEach(({ pc }) => {
+          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+          sender?.replaceTrack(camTrack);
+        });
       };
-    } catch { /* user cancelled */ }
+    } catch { /* cancelled */ }
   }
 
   if (!call || !user) {
     return <div className="grid min-h-screen place-items-center bg-background"><MeduxLogo size={48} /></div>;
   }
 
-  // Incoming call overlay
+  // Incoming 1:1 overlay
   if (incoming) {
     return (
       <div className="relative grid min-h-screen place-items-center overflow-hidden bg-background text-foreground">
@@ -221,11 +312,11 @@ function CallScreen() {
           <div className="relative mx-auto mb-8 h-40 w-40">
             <div className="ring-wave absolute inset-0 rounded-full" />
             <div className="grid h-full w-full place-items-center rounded-full gradient-brand text-5xl font-bold text-white shadow-glow">
-              {other?.avatar_url ? <img src={other.avatar_url} className="h-full w-full rounded-full object-cover" alt="" /> : initials(other?.full_name)}
+              {initials("Incoming")}
             </div>
           </div>
-          <h2 className="font-['Space_Grotesk'] text-3xl font-bold">{other?.full_name || "Unknown"}</h2>
-          <p className="mt-1 text-muted-foreground">Incoming {call.type} call…</p>
+          <h2 className="font-['Space_Grotesk'] text-3xl font-bold">Incoming call</h2>
+          <p className="mt-1 text-muted-foreground">{call.type} call from a contact</p>
           <div className="mt-10 flex justify-center gap-6">
             <button onClick={declineCall} className="grid h-16 w-16 place-items-center rounded-full bg-destructive text-white shadow-glow hover:scale-110 active:scale-95 transition">
               <PhoneOff className="h-6 w-6" />
@@ -239,67 +330,210 @@ function CallScreen() {
     );
   }
 
-  // Active call
+  const peerList = Object.entries(peers);
+  const inviteUrl = call.invite_code ? `${typeof window !== "undefined" ? window.location.origin : ""}/join/${call.invite_code}` : "";
+  const otherPeer = peerList[0]?.[1];
+
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black text-white">
-      {call.type === "video" ? (
-        <video ref={remoteRef} autoPlay playsInline className="h-full w-full object-cover" />
-      ) : (
-        <div className="grid h-full w-full place-items-center">
-          <div className="text-center">
-            <div className="relative mx-auto h-48 w-48">
-              <div className={`absolute inset-0 rounded-full ${connected ? "" : "ring-wave"}`} />
-              <div className="grid h-full w-full place-items-center rounded-full gradient-brand text-6xl font-bold text-white shadow-glow">
-                {other?.avatar_url ? <img src={other.avatar_url} className="h-full w-full rounded-full object-cover" alt="" /> : initials(other?.full_name)}
+      {/* Video grid */}
+      <div className={`grid h-full w-full gap-1 ${peerList.length <= 1 ? "grid-cols-1" : peerList.length === 2 ? "grid-cols-2" : "grid-cols-2 grid-rows-2"}`}>
+        {peerList.length === 0 ? (
+          <div className="grid h-full w-full place-items-center">
+            <div className="text-center">
+              <div className="relative mx-auto h-48 w-48">
+                <div className="ring-wave absolute inset-0 rounded-full" />
+                <div className="grid h-full w-full place-items-center rounded-full gradient-brand text-6xl font-bold text-white shadow-glow">
+                  {initials("Waiting")}
+                </div>
               </div>
+              <h2 className="mt-8 font-['Space_Grotesk'] text-3xl font-bold">Waiting for others…</h2>
+              {call.invite_code && (
+                <p className="mt-2 text-white/60">Share code <span className="font-mono font-bold text-white">{call.invite_code}</span></p>
+              )}
             </div>
-            <h2 className="mt-8 font-['Space_Grotesk'] text-3xl font-bold">{other?.full_name}</h2>
-            <p className="mt-2 text-white/60">{connected ? fmtDuration(seconds) : "Calling…"}</p>
           </div>
-        </div>
-      )}
+        ) : peerList.map(([peerId, p]) => (
+          <PeerTile key={peerId} state={p} audioOnly={call.type !== "video"} />
+        ))}
+      </div>
 
+      {/* Local PiP */}
       {call.type === "video" && (
         <motion.div drag dragMomentum={false}
-          className="absolute bottom-28 right-6 h-40 w-28 overflow-hidden rounded-2xl ring-2 ring-white/20 shadow-glow md:h-48 md:w-32 cursor-move">
+          className="absolute bottom-28 right-6 h-40 w-28 overflow-hidden rounded-2xl ring-2 ring-white/20 shadow-glow md:h-48 md:w-32 cursor-move z-30">
           <video ref={localRef} autoPlay playsInline muted className="h-full w-full object-cover" />
         </motion.div>
       )}
 
       {/* Top bar */}
-      <div className="absolute left-0 right-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/60 to-transparent p-6">
+      <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent p-6">
         <MeduxLogo size={28} />
         <div className="rounded-full bg-black/40 px-4 py-1.5 text-sm font-medium tabular-nums backdrop-blur">
-          {connected ? fmtDuration(seconds) : "Connecting…"}
+          {peerList.length > 0 ? fmtDuration(seconds) : "Connecting…"}
         </div>
-        <div className="text-sm">{other?.full_name}</div>
+        <div className="flex items-center gap-2 text-sm">
+          {call.is_group && <span className="rounded-full bg-white/10 px-3 py-1 text-xs">Group · {peerList.length + 1}</span>}
+          {!call.is_group && otherPeer?.profile?.full_name && <span>{otherPeer.profile.full_name}</span>}
+        </div>
       </div>
+
+      {/* Subtitles */}
+      {subtitlesOn && (subtitle.en || subtitle.am) && (
+        <div className="absolute bottom-32 left-1/2 z-20 -translate-x-1/2 max-w-[80%] rounded-2xl bg-black/70 px-4 py-3 text-center backdrop-blur">
+          <div className="text-sm text-white">{subtitle.en}</div>
+          {subtitle.am && <div className="mt-1 text-sm text-primary-glow" lang="am" dir="ltr">{subtitle.am}</div>}
+        </div>
+      )}
 
       {/* Controls */}
       <AnimatePresence>
         <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-full bg-black/50 px-3 py-3 backdrop-blur shadow-glow">
-          <button onClick={toggleMute} className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${muted ? "bg-destructive" : "bg-white/10"}`}>
+          className="absolute bottom-6 left-1/2 z-30 -translate-x-1/2 flex items-center gap-2 rounded-full bg-black/60 px-3 py-3 backdrop-blur shadow-glow">
+          <button onClick={toggleMute} title="Mute" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${muted ? "bg-destructive" : "bg-white/10"}`}>
             {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
           </button>
           {call.type === "video" && (
             <>
-              <button onClick={toggleCam} className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${camOff ? "bg-destructive" : "bg-white/10"}`}>
+              <button onClick={toggleCam} title="Camera" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${camOff ? "bg-destructive" : "bg-white/10"}`}>
                 {camOff ? <VideoOff className="h-5 w-5" /> : <VideoIcon className="h-5 w-5" />}
               </button>
-              <button onClick={shareScreen} className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
+              <button onClick={shareScreen} title="Share screen" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
                 <Monitor className="h-5 w-5" />
-              </button>
-              <button onClick={() => document.documentElement.requestFullscreen?.()} className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
-                <Maximize className="h-5 w-5" />
               </button>
             </>
           )}
-          <button onClick={endCall} className="grid h-14 w-14 place-items-center rounded-full bg-destructive shadow-glow hover:scale-110 transition">
+          <button onClick={() => setSubtitlesOn((v) => !v)} title="Live subtitles + Amharic" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${subtitlesOn ? "bg-primary" : "bg-white/10"}`}>
+            <Languages className="h-5 w-5" />
+          </button>
+          <button onClick={() => setShowAI((v) => !v)} title="Medux AI" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${showAI ? "bg-primary" : "bg-white/10"}`}>
+            <Sparkles className="h-5 w-5" />
+          </button>
+          <button onClick={() => setShowInvite(true)} title="Invite" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
+            <LinkIcon className="h-5 w-5" />
+          </button>
+          <button onClick={() => document.documentElement.requestFullscreen?.()} title="Fullscreen" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
+            <Maximize className="h-5 w-5" />
+          </button>
+          <button onClick={endCall} title="End" className="grid h-14 w-14 place-items-center rounded-full bg-destructive shadow-glow hover:scale-110 transition">
             <PhoneOff className="h-6 w-6" />
           </button>
         </motion.div>
       </AnimatePresence>
+
+      {/* Invite modal */}
+      <AnimatePresence>
+        {showInvite && call.invite_code && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur" onClick={() => setShowInvite(false)}>
+            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+              className="w-full max-w-md rounded-3xl bg-card p-6 text-foreground shadow-glow" onClick={(e) => e.stopPropagation()}>
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="font-['Space_Grotesk'] text-xl font-bold">Invite to call</h3>
+                <button onClick={() => setShowInvite(false)} className="grid h-8 w-8 place-items-center rounded-full hover:bg-accent"><X className="h-4 w-4" /></button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <div className="text-xs text-muted-foreground">Join code</div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <div className="flex-1 rounded-xl bg-muted px-4 py-3 font-mono text-2xl font-bold tracking-widest text-center">{call.invite_code}</div>
+                    <button onClick={() => { navigator.clipboard.writeText(call.invite_code!); toast.success("Code copied"); }}
+                      className="grid h-12 w-12 place-items-center rounded-xl gradient-brand text-white"><Copy className="h-4 w-4" /></button>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Invite link</div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input readOnly value={inviteUrl} className="flex-1 rounded-xl bg-muted px-4 py-3 text-sm" />
+                    <button onClick={() => { navigator.clipboard.writeText(inviteUrl); toast.success("Link copied"); }}
+                      className="grid h-12 w-12 place-items-center rounded-xl gradient-brand text-white"><Copy className="h-4 w-4" /></button>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">Anyone with the code or link can join. The call stays active while at least one person is connected.</p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* AI panel */}
+      <AnimatePresence>
+        {showAI && (
+          <AIChatPanel onClose={() => setShowAI(false)} peerId={!call.is_group ? (call.initiator_id === user.id ? call.callee_id : call.initiator_id) ?? undefined : undefined} />
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function PeerTile({ state, audioOnly }: { state: PeerState; audioOnly: boolean }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (ref.current && state.stream) ref.current.srcObject = state.stream;
+  }, [state.stream]);
+  return (
+    <div className="relative h-full w-full bg-black/40">
+      {audioOnly ? (
+        <div className="grid h-full w-full place-items-center">
+          <div className="grid h-32 w-32 place-items-center rounded-full gradient-brand text-3xl font-bold text-white shadow-glow">
+            {state.profile?.avatar_url ? <img src={state.profile.avatar_url} alt="" className="h-full w-full rounded-full object-cover" /> : initials(state.profile?.full_name)}
+          </div>
+        </div>
+      ) : (
+        <video ref={ref} autoPlay playsInline className="h-full w-full object-cover" />
+      )}
+      {state.profile?.full_name && (
+        <div className="absolute bottom-2 left-2 rounded-full bg-black/60 px-3 py-1 text-xs backdrop-blur">{state.profile.full_name}</div>
+      )}
+    </div>
+  );
+}
+
+function AIChatPanel({ onClose, peerId }: { onClose: () => void; peerId?: string }) {
+  const [history, setHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([
+    { role: "assistant", content: peerId ? "Hi — I'm Medux AI. I know your recent chat with this person. Ask me anything." : "Hi — I'm Medux AI. Ask me anything." },
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [history]);
+
+  async function send() {
+    const text = input.trim();
+    if (!text || loading) return;
+    setInput("");
+    const next = [...history, { role: "user" as const, content: text }];
+    setHistory(next);
+    setLoading(true);
+    try {
+      const { answer } = await askMeduxAI({ data: { prompt: text, peerId, history: next.slice(-12) } });
+      setHistory([...next, { role: "assistant", content: answer }]);
+    } catch (e) {
+      setHistory([...next, { role: "assistant", content: (e as Error).message || "AI error" }]);
+    } finally { setLoading(false); }
+  }
+
+  return (
+    <motion.div initial={{ x: 400 }} animate={{ x: 0 }} exit={{ x: 400 }}
+      className="absolute right-0 top-0 z-40 flex h-full w-full max-w-md flex-col border-l border-white/10 bg-card/95 text-foreground backdrop-blur">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /><span className="font-semibold">Medux AI</span></div>
+        <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-full hover:bg-accent"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        {history.map((m, i) => (
+          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${m.role === "user" ? "gradient-brand text-white" : "bg-muted"}`}>{m.content}</div>
+          </div>
+        ))}
+        {loading && <div className="text-xs text-muted-foreground">Thinking…</div>}
+        <div ref={endRef} />
+      </div>
+      <div className="flex items-center gap-2 border-t border-border p-3">
+        <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()}
+          placeholder="Ask about your chat, draft a reply…" className="flex-1 rounded-xl bg-muted px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-primary" />
+        <button onClick={send} disabled={loading} className="grid h-10 w-10 place-items-center rounded-xl gradient-brand text-white disabled:opacity-50"><Send className="h-4 w-4" /></button>
+      </div>
+    </motion.div>
   );
 }
