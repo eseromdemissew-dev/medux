@@ -121,6 +121,75 @@ export const joinCall = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+// Request to join a call (knock). Host is auto-approved. Others get a pending request.
+export const requestToJoin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({ callId: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
+    const { data: call } = await supabaseAdmin.from("calls")
+      .select("host_id, initiator_id, callee_id, is_group")
+      .eq("id", data.callId).maybeSingle();
+    if (!call) throw new Error("Call not found");
+    // Host, initiator, and the direct callee bypass the knock gate.
+    if (call.host_id === userId || call.initiator_id === userId || call.callee_id === userId) {
+      return { status: "approved" as const };
+    }
+    type CJRRow = { id: string; status: string };
+    const cjr = supabaseAdmin.from("call_join_requests" as never);
+    await (cjr as unknown as { upsert: (v: object, o: object) => Promise<unknown> }).upsert(
+      { call_id: data.callId, user_id: userId, status: "pending", decided_at: null },
+      { onConflict: "call_id,user_id" },
+    );
+    // Notify host
+    const hostId = call.host_id ?? call.initiator_id;
+    if (hostId) {
+      await supabaseAdmin.from("notifications").insert({
+        user_id: hostId,
+        type: "join_request",
+        title: "Someone wants to join",
+        body: "Tap to admit",
+        data: { call_id: data.callId, requester_id: userId },
+      });
+      await sendPushToUser(hostId, {
+        type: "join_request",
+        title: "Knock knock",
+        body: "Someone wants to join your call",
+        tag: `knock-${data.callId}-${userId}`,
+        call_id: data.callId,
+      });
+    }
+    void cjr; void ({} as CJRRow);
+    return { status: "pending" as const };
+  });
+
+// Host approves or denies a pending join request.
+export const decideJoinRequest = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input) => z.object({
+    requestId: z.string().uuid(),
+    approve: z.boolean(),
+  }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
+    const cjr = supabaseAdmin.from("call_join_requests" as never) as unknown as {
+      select: (s: string) => { eq: (k: string, v: string) => { maybeSingle: () => Promise<{ data: { call_id: string } | null }> } };
+      update: (v: object) => { eq: (k: string, v: string) => Promise<unknown> };
+    };
+    const { data: req } = await cjr.select("call_id").eq("id", data.requestId).maybeSingle();
+    if (!req) throw new Error("Request not found");
+    const { data: call } = await supabaseAdmin.from("calls")
+      .select("host_id, initiator_id").eq("id", req.call_id).maybeSingle();
+    if (!call || (call.host_id !== userId && call.initiator_id !== userId)) {
+      throw new Error("Not authorized");
+    }
+    await cjr.update({
+      status: data.approve ? "approved" : "denied",
+      decided_at: new Date().toISOString(),
+    }).eq("id", data.requestId);
+    return { ok: true };
+  });
+
 // ---- Web Push sender (server-side) ----
 async function sendPushToUser(userId: string, payload: Record<string, unknown>) {
   const vapidPublic = process.env.VAPID_PUBLIC_KEY;

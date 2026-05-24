@@ -6,11 +6,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { fmtDuration, initials, Ringtone } from "@/lib/medux";
 import { MeduxLogo } from "@/components/MeduxLogo";
-import { joinCall } from "@/lib/calls.functions";
+import { joinCall, decideJoinRequest } from "@/lib/calls.functions";
 import { askMeduxAI, translateToAmharic } from "@/lib/ai.functions";
 import {
   Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, Phone, Monitor, Maximize,
-  Copy, Link as LinkIcon, Sparkles, Languages, X, Send,
+  Copy, Link as LinkIcon, Sparkles, Languages, X, Send, UserCheck, UserX,
 } from "lucide-react";
 
 export const Route = createFileRoute("/call/$callId")({
@@ -60,6 +60,9 @@ function CallScreen() {
   const ringtoneRef = useRef<Ringtone | null>(null);
   const timerRef = useRef<number | null>(null);
   const speechRef = useRef<SpeechRecognition | null>(null);
+  const [joinRequests, setJoinRequests] = useState<{ id: string; user_id: string; profile?: Profile }[]>([]);
+
+  const isHost = !!user && !!call && (user.id === (call.host_id ?? call.initiator_id));
 
   const isInitiator = !!user && !!call && user.id === call.initiator_id;
   const incoming = !!call && !call.is_group && !isInitiator && call.status === "ringing";
@@ -98,6 +101,42 @@ function CallScreen() {
     return () => { supabase.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [call?.id]);
+
+  // Host: subscribe to pending join requests for this call
+  useEffect(() => {
+    if (!call || !user || !isHost) return;
+    const cjr = supabase.from("call_join_requests" as never) as unknown as {
+      select: (s: string) => { eq: (k: string, v: string) => { eq: (k: string, v: string) => Promise<{ data: { id: string; user_id: string }[] | null }> } };
+    };
+    const loadPending = async () => {
+      const { data } = await cjr.select("id, user_id").eq("call_id", call.id).eq("status", "pending");
+      const rows = (data ?? []) as { id: string; user_id: string }[];
+      if (rows.length === 0) { setJoinRequests([]); return; }
+      const { data: profs } = await supabase.from("profiles")
+        .select("id, full_name, avatar_url").in("id", rows.map((r) => r.user_id));
+      const pmap: Record<string, Profile> = {};
+      (profs as Profile[] | null)?.forEach((p) => (pmap[p.id] = p));
+      setJoinRequests(rows.map((r) => ({ ...r, profile: pmap[r.user_id] })));
+    };
+    loadPending();
+    const ch = supabase.channel(`call-knock-${call.id}`)
+      .on("postgres_changes", {
+        event: "*", schema: "public", table: "call_join_requests",
+        filter: `call_id=eq.${call.id}`,
+      }, () => { loadPending(); })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [call, user, isHost]);
+
+  async function admit(reqId: string, approve: boolean) {
+    try {
+      await decideJoinRequest({ data: { requestId: reqId, approve } });
+      setJoinRequests((prev) => prev.filter((r) => r.id !== reqId));
+      toast.success(approve ? "Admitted" : "Denied");
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
 
   const cleanup = useCallback(() => {
     ringtoneRef.current?.stop();
@@ -318,10 +357,10 @@ function CallScreen() {
           <h2 className="font-['Space_Grotesk'] text-3xl font-bold">Incoming call</h2>
           <p className="mt-1 text-muted-foreground">{call.type} call from a contact</p>
           <div className="mt-10 flex justify-center gap-6">
-            <button onClick={declineCall} className="grid h-16 w-16 place-items-center rounded-full bg-destructive text-white shadow-glow hover:scale-110 active:scale-95 transition">
+            <button onClick={declineCall} aria-label="Decline call" className="grid h-16 w-16 place-items-center rounded-full bg-destructive text-white shadow-glow hover:scale-110 active:scale-95 transition">
               <PhoneOff className="h-6 w-6" />
             </button>
-            <button onClick={answerCall} className="grid h-16 w-16 place-items-center rounded-full bg-success text-white shadow-glow hover:scale-110 active:scale-95 transition">
+            <button onClick={answerCall} aria-label="Answer call" className="grid h-16 w-16 place-items-center rounded-full bg-success text-white shadow-glow hover:scale-110 active:scale-95 transition">
               <Phone className="h-6 w-6" />
             </button>
           </div>
@@ -336,6 +375,22 @@ function CallScreen() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black text-white">
+      <h1 className="sr-only">{call.is_group ? "Group call" : "Call"}</h1>
+      {isHost && joinRequests.length > 0 && (
+        <div className="absolute left-4 top-20 z-40 w-72 space-y-2 rounded-2xl bg-card/95 p-3 text-foreground shadow-glow backdrop-blur">
+          <div className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Waiting to join</div>
+          {joinRequests.map((r) => (
+            <div key={r.id} className="flex items-center gap-2 rounded-xl bg-muted/40 p-2">
+              <div className="grid h-9 w-9 place-items-center rounded-full gradient-brand text-xs font-semibold text-white">
+                {r.profile?.avatar_url ? <img src={r.profile.avatar_url} alt="" className="h-full w-full rounded-full object-cover" /> : initials(r.profile?.full_name)}
+              </div>
+              <div className="flex-1 truncate text-sm font-medium">{r.profile?.full_name ?? "Guest"}</div>
+              <button onClick={() => admit(r.id, true)} aria-label="Admit" className="grid h-8 w-8 place-items-center rounded-full bg-success text-white hover:scale-110 transition"><UserCheck className="h-4 w-4" /></button>
+              <button onClick={() => admit(r.id, false)} aria-label="Deny" className="grid h-8 w-8 place-items-center rounded-full bg-destructive text-white hover:scale-110 transition"><UserX className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+      )}
       {/* Video grid */}
       <div className={`grid h-full w-full gap-1 ${peerList.length <= 1 ? "grid-cols-1" : peerList.length === 2 ? "grid-cols-2" : "grid-cols-2 grid-rows-2"}`}>
         {peerList.length === 0 ? (
@@ -390,32 +445,32 @@ function CallScreen() {
       <AnimatePresence>
         <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
           className="absolute bottom-6 left-1/2 z-30 -translate-x-1/2 flex items-center gap-2 rounded-full bg-black/60 px-3 py-3 backdrop-blur shadow-glow">
-          <button onClick={toggleMute} title="Mute" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${muted ? "bg-destructive" : "bg-white/10"}`}>
+          <button onClick={toggleMute} title="Mute" aria-label="Mute" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${muted ? "bg-destructive" : "bg-white/10"}`}>
             {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
           </button>
           {call.type === "video" && (
             <>
-              <button onClick={toggleCam} title="Camera" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${camOff ? "bg-destructive" : "bg-white/10"}`}>
+              <button onClick={toggleCam} title="Camera" aria-label="Camera" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${camOff ? "bg-destructive" : "bg-white/10"}`}>
                 {camOff ? <VideoOff className="h-5 w-5" /> : <VideoIcon className="h-5 w-5" />}
               </button>
-              <button onClick={shareScreen} title="Share screen" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
+              <button onClick={shareScreen} title="Share screen" aria-label="Share screen" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
                 <Monitor className="h-5 w-5" />
               </button>
             </>
           )}
-          <button onClick={() => setSubtitlesOn((v) => !v)} title="Live subtitles + Amharic" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${subtitlesOn ? "bg-primary" : "bg-white/10"}`}>
+          <button onClick={() => setSubtitlesOn((v) => !v)} title="Live subtitles + Amharic" aria-label="Live subtitles + Amharic" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${subtitlesOn ? "bg-primary" : "bg-white/10"}`}>
             <Languages className="h-5 w-5" />
           </button>
-          <button onClick={() => setShowAI((v) => !v)} title="Medux AI" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${showAI ? "bg-primary" : "bg-white/10"}`}>
+          <button onClick={() => setShowAI((v) => !v)} title="Medux AI" aria-label="Medux AI" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${showAI ? "bg-primary" : "bg-white/10"}`}>
             <Sparkles className="h-5 w-5" />
           </button>
-          <button onClick={() => setShowInvite(true)} title="Invite" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
+          <button onClick={() => setShowInvite(true)} title="Invite" aria-label="Invite" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
             <LinkIcon className="h-5 w-5" />
           </button>
-          <button onClick={() => document.documentElement.requestFullscreen?.()} title="Fullscreen" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
+          <button onClick={() => document.documentElement.requestFullscreen?.()} title="Fullscreen" aria-label="Fullscreen" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
             <Maximize className="h-5 w-5" />
           </button>
-          <button onClick={endCall} title="End" className="grid h-14 w-14 place-items-center rounded-full bg-destructive shadow-glow hover:scale-110 transition">
+          <button onClick={endCall} title="End" aria-label="End" className="grid h-14 w-14 place-items-center rounded-full bg-destructive shadow-glow hover:scale-110 transition">
             <PhoneOff className="h-6 w-6" />
           </button>
         </motion.div>

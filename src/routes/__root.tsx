@@ -56,10 +56,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:title", content: "Medux — Connect. Clearly." },
       { property: "og:description", content: "Medux is a professional real-time video and voice calling platform. Crystal-clear calls, friends, presence, and chat." },
       { property: "og:type", content: "website" },
+      { property: "og:site_name", content: "Medux" },
       { name: "twitter:title", content: "Medux — Connect. Clearly." },
       { name: "twitter:description", content: "Medux is a professional real-time video and voice calling platform. Crystal-clear calls, friends, presence, and chat." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8c1cd92c-09fe-4cec-8e2b-b3a40dd4eb97/id-preview-7a765ac1--985ba55a-be13-4900-8fec-a12fb32685d9.lovable.app-1778874601437.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8c1cd92c-09fe-4cec-8e2b-b3a40dd4eb97/id-preview-7a765ac1--985ba55a-be13-4900-8fec-a12fb32685d9.lovable.app-1778874601437.png" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [
@@ -68,6 +67,27 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" },
+    ],
+    scripts: [
+      {
+        type: "application/ld+json",
+        children: JSON.stringify({
+          "@context": "https://schema.org",
+          "@graph": [
+            {
+              "@type": "Organization",
+              name: "Medux",
+              url: "https://meduxconnect.lovable.app",
+              description: "Real-time video and voice calling platform with group calls, invite codes, AI assistant, and live translation.",
+            },
+            {
+              "@type": "WebSite",
+              name: "Medux",
+              url: "https://meduxconnect.lovable.app",
+            },
+          ],
+        }),
+      },
     ],
   }),
   shellComponent: RootShell,

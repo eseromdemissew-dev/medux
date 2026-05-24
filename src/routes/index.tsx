@@ -6,9 +6,27 @@ import { Phone, Video, Shield, Zap, Users, Sparkles } from "lucide-react";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Medux — Connect. Clearly." },
-      { name: "description", content: "Professional real-time video and voice calling. Crystal-clear quality, end-to-end encrypted, beautifully simple." },
+      { property: "og:url", content: "https://meduxconnect.lovable.app/" },
+      { name: "twitter:url", content: "https://meduxconnect.lovable.app/" },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8c1cd92c-09fe-4cec-8e2b-b3a40dd4eb97/id-preview-7a765ac1--985ba55a-be13-4900-8fec-a12fb32685d9.lovable.app-1778874601437.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8c1cd92c-09fe-4cec-8e2b-b3a40dd4eb97/id-preview-7a765ac1--985ba55a-be13-4900-8fec-a12fb32685d9.lovable.app-1778874601437.png" },
     ],
+    links: [{ rel: "canonical", href: "https://meduxconnect.lovable.app/" }],
+    scripts: [{
+      type: "application/ld+json",
+      children: JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "Service",
+        name: "Medux",
+        serviceType: "Video and Voice Calling Platform",
+        provider: { "@type": "Organization", name: "Medux", url: "https://meduxconnect.lovable.app" },
+        description: "Real-time video and voice calling with group calls (up to 4), invite codes, AI assistant, live subtitles, and Amharic translation.",
+        offers: [
+          { "@type": "Offer", name: "Free", price: "0", priceCurrency: "USD" },
+          { "@type": "Offer", name: "Pro", price: "8", priceCurrency: "USD" },
+        ],
+      }),
+    }],
   }),
   component: Landing,
 });
@@ -33,7 +51,8 @@ function Landing() {
         </Link>
       </header>
 
-      <section className="relative z-10 mx-auto max-w-6xl px-6 pt-16 pb-24 text-center md:pt-28">
+      <main className="relative z-10">
+      <section className="mx-auto max-w-6xl px-6 pt-16 pb-24 text-center md:pt-28">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
           <span className="inline-flex items-center gap-2 rounded-full glass px-4 py-1.5 text-xs font-medium text-muted-foreground">
             <Sparkles className="h-3.5 w-3.5 text-primary" />
@@ -75,22 +94,22 @@ function Landing() {
         >
           <div className="relative h-full w-full overflow-hidden rounded-2xl bg-gradient-to-br from-primary/20 via-secondary/20 to-primary/30">
             <div className="absolute inset-0" style={{ background: "var(--gradient-glow)" }} />
-            <div className="absolute bottom-6 left-1/2 flex -translate-x-1/2 gap-3">
+            <div aria-hidden="true" className="absolute bottom-6 left-1/2 flex -translate-x-1/2 gap-3">
               {[0,1,2,3,4].map((i) => (
-                <button key={i} className="grid h-12 w-12 place-items-center rounded-full glass shadow-card">
+                <div key={i} className="grid h-12 w-12 place-items-center rounded-full glass shadow-card">
                   <div className="h-5 w-5 rounded-full bg-primary/70" />
-                </button>
+                </div>
               ))}
-              <button className="grid h-12 w-12 place-items-center rounded-full bg-destructive shadow-glow">
+              <div className="grid h-12 w-12 place-items-center rounded-full bg-destructive shadow-glow">
                 <Phone className="h-5 w-5 rotate-[135deg] text-white" />
-              </button>
+              </div>
             </div>
             <div className="absolute right-6 top-6 h-32 w-44 rounded-xl bg-background/80 ring-1 ring-border" />
           </div>
         </motion.div>
       </section>
 
-      <section id="features" className="relative z-10 mx-auto max-w-6xl px-6 py-24">
+      <section id="features" className="mx-auto max-w-6xl px-6 py-24">
         <h2 className="text-center font-['Space_Grotesk'] text-3xl font-bold md:text-5xl">
           Everything you need. <span className="text-gradient">Nothing you don't.</span>
         </h2>
@@ -119,7 +138,7 @@ function Landing() {
         </div>
       </section>
 
-      <section id="pricing" className="relative z-10 mx-auto max-w-6xl px-6 py-24">
+      <section id="pricing" className="mx-auto max-w-6xl px-6 py-24">
         <h2 className="text-center font-['Space_Grotesk'] text-3xl font-bold md:text-5xl">Simple pricing</h2>
         <div className="mt-14 grid gap-6 md:grid-cols-3">
           {[
@@ -139,6 +158,7 @@ function Landing() {
           ))}
         </div>
       </section>
+      </main>
 
       <footer className="relative z-10 border-t border-border px-6 py-10 text-sm text-muted-foreground">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
