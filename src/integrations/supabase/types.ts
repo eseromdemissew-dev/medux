@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      call_join_requests: {
+        Row: {
+          call_id: string
+          created_at: string
+          decided_at: string | null
+          id: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          call_id: string
+          created_at?: string
+          decided_at?: string | null
+          id?: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          call_id?: string
+          created_at?: string
+          decided_at?: string | null
+          id?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       call_participants: {
         Row: {
           call_id: string
