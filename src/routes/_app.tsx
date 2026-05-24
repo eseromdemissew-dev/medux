@@ -9,7 +9,6 @@ import { useAuth, useTheme } from "@/hooks/useAuth";
 import { initials } from "@/lib/medux";
 import { IncomingCallRinger } from "@/components/IncomingCallRinger";
 import { Badge, useUnreadCounts } from "@/components/NotifBadges";
-import { enablePushNotifications, registerServiceWorker } from "@/lib/push.client";
 import { getPushConfig } from "@/lib/calls.functions";
 
 export const Route = createFileRoute("/_app")({
