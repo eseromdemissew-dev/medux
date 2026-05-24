@@ -375,6 +375,22 @@ function CallScreen() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black text-white">
+      <h1 className="sr-only">{call.is_group ? "Group call" : "Call"}</h1>
+      {isHost && joinRequests.length > 0 && (
+        <div className="absolute left-4 top-20 z-40 w-72 space-y-2 rounded-2xl bg-card/95 p-3 text-foreground shadow-glow backdrop-blur">
+          <div className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Waiting to join</div>
+          {joinRequests.map((r) => (
+            <div key={r.id} className="flex items-center gap-2 rounded-xl bg-muted/40 p-2">
+              <div className="grid h-9 w-9 place-items-center rounded-full gradient-brand text-xs font-semibold text-white">
+                {r.profile?.avatar_url ? <img src={r.profile.avatar_url} alt="" className="h-full w-full rounded-full object-cover" /> : initials(r.profile?.full_name)}
+              </div>
+              <div className="flex-1 truncate text-sm font-medium">{r.profile?.full_name ?? "Guest"}</div>
+              <button onClick={() => admit(r.id, true)} aria-label="Admit" className="grid h-8 w-8 place-items-center rounded-full bg-success text-white hover:scale-110 transition"><UserCheck className="h-4 w-4" /></button>
+              <button onClick={() => admit(r.id, false)} aria-label="Deny" className="grid h-8 w-8 place-items-center rounded-full bg-destructive text-white hover:scale-110 transition"><UserX className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+      )}
       {/* Video grid */}
       <div className={`grid h-full w-full gap-1 ${peerList.length <= 1 ? "grid-cols-1" : peerList.length === 2 ? "grid-cols-2" : "grid-cols-2 grid-rows-2"}`}>
         {peerList.length === 0 ? (
