@@ -1,0 +1,11 @@
+# Medux
+
+> Medux is a real-time video and voice calling platform with group calls,
+> invite codes, in-call AI assistant, live subtitles, and Amharic
+> translation.
+
+## Pages
+
+- [Home](/): Product overview, features, and pricing for Medux.
+- [Sign in](/login): Existing-user login (email or Google).
+- [Sign up](/signup): Create a new Medux account.

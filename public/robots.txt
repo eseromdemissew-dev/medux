@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Disallow: /call/
+Disallow: /join/
+Disallow: /dashboard
+Disallow: /messages
+Disallow: /contacts
+Disallow: /calls
+Disallow: /profile
+Disallow: /settings
+
+Sitemap: https://meduxconnect.lovable.app/sitemap.xml
