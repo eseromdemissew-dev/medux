@@ -357,10 +357,10 @@ function CallScreen() {
           <h2 className="font-['Space_Grotesk'] text-3xl font-bold">Incoming call</h2>
           <p className="mt-1 text-muted-foreground">{call.type} call from a contact</p>
           <div className="mt-10 flex justify-center gap-6">
-            <button onClick={declineCall} className="grid h-16 w-16 place-items-center rounded-full bg-destructive text-white shadow-glow hover:scale-110 active:scale-95 transition">
+            <button onClick={declineCall} aria-label="Decline call" className="grid h-16 w-16 place-items-center rounded-full bg-destructive text-white shadow-glow hover:scale-110 active:scale-95 transition">
               <PhoneOff className="h-6 w-6" />
             </button>
-            <button onClick={answerCall} className="grid h-16 w-16 place-items-center rounded-full bg-success text-white shadow-glow hover:scale-110 active:scale-95 transition">
+            <button onClick={answerCall} aria-label="Answer call" className="grid h-16 w-16 place-items-center rounded-full bg-success text-white shadow-glow hover:scale-110 active:scale-95 transition">
               <Phone className="h-6 w-6" />
             </button>
           </div>
