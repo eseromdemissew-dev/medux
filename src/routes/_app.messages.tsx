@@ -66,6 +66,7 @@ function Messages() {
 
   return (
     <div className="grid h-[calc(100vh-9rem)] gap-4 lg:grid-cols-[280px_1fr]">
+      <h1 className="sr-only">Messages</h1>
       <div className="rounded-2xl glass p-3 shadow-card overflow-y-auto">
         <h2 className="px-2 py-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Conversations</h2>
         {contacts.length === 0 ? (
@@ -74,7 +75,7 @@ function Messages() {
           <ul className="space-y-1">
             {contacts.map((c) => (
               <li key={c.id}>
-                <button onClick={() => setActiveId(c.id)} className={`flex w-full items-center gap-3 rounded-xl p-2 text-left transition ${activeId === c.id ? "gradient-brand text-white" : "hover:bg-accent/50"}`}>
+                <button onClick={() => setActiveId(c.id)} aria-label={`Open chat with ${c.full_name ?? "contact"}`} className={`flex w-full items-center gap-3 rounded-xl p-2 text-left transition ${activeId === c.id ? "gradient-brand text-white" : "hover:bg-accent/50"}`}>
                   <div className="grid h-9 w-9 place-items-center rounded-full bg-white/20 text-xs font-semibold">{initials(c.full_name)}</div>
                   <div className="truncate text-sm font-medium">{c.full_name}</div>
                 </button>
@@ -110,8 +111,9 @@ function Messages() {
             </div>
             <form onSubmit={send} className="flex gap-2 border-t border-border p-3">
               <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Type a message…"
+                aria-label="Message"
                 className="flex-1 rounded-xl bg-input/50 px-4 py-2.5 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary" />
-              <button className="grid h-10 w-10 place-items-center rounded-xl gradient-brand text-white shadow-glow hover:scale-105 transition">
+              <button aria-label="Send message" className="grid h-10 w-10 place-items-center rounded-xl gradient-brand text-white shadow-glow hover:scale-105 transition">
                 <Send className="h-4 w-4" />
               </button>
             </form>

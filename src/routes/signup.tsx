@@ -7,7 +7,16 @@ import { AuthShell } from "@/components/AuthShell";
 import { Loader2, Mail, Lock, User } from "lucide-react";
 
 export const Route = createFileRoute("/signup")({
-  head: () => ({ meta: [{ title: "Sign up — Medux" }] }),
+  head: () => ({
+    meta: [
+      { title: "Sign up — Medux" },
+      { name: "description", content: "Create your free Medux account and start crystal-clear video and voice calls in seconds." },
+      { property: "og:title", content: "Sign up — Medux" },
+      { property: "og:description", content: "Create your free Medux account and start crystal-clear video and voice calls in seconds." },
+      { property: "og:url", content: "https://meduxconnect.lovable.app/signup" },
+    ],
+    links: [{ rel: "canonical", href: "https://meduxconnect.lovable.app/signup" }],
+  }),
   component: SignupPage,
 });
 
@@ -53,20 +62,24 @@ function SignupPage() {
       </button>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="relative">
-          <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <User aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input required value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Full name"
+            aria-label="Full name"
             className="w-full rounded-xl bg-input/50 px-10 py-3 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary" />
         </div>
         <input required value={username} onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
-          placeholder="username" className="w-full rounded-xl bg-input/50 px-4 py-3 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary" />
+          placeholder="username" aria-label="Username"
+          className="w-full rounded-xl bg-input/50 px-4 py-3 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary" />
         <div className="relative">
-          <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Mail aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com"
+            aria-label="Email address"
             className="w-full rounded-xl bg-input/50 px-10 py-3 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary" />
         </div>
         <div className="relative">
-          <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Lock aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password"
+            aria-label="Password"
             className="w-full rounded-xl bg-input/50 px-10 py-3 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary" />
         </div>
         {password.length > 0 && (

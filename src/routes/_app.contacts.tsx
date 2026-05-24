@@ -102,6 +102,7 @@ function Contacts() {
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by username or name…"
+            aria-label="Search contacts"
             className="w-full rounded-xl bg-input/50 px-10 py-3 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary" />
         </div>
         {results.length > 0 && (
@@ -135,8 +136,8 @@ function Contacts() {
                     <div className="text-sm font-medium">{p?.full_name}</div>
                     <div className="text-xs text-muted-foreground">@{p?.username}</div>
                   </div>
-                  <button onClick={() => respond(c, true)} className="grid h-9 w-9 place-items-center rounded-full bg-success text-white hover:scale-110 transition"><Check className="h-4 w-4" /></button>
-                  <button onClick={() => respond(c, false)} className="grid h-9 w-9 place-items-center rounded-full bg-destructive text-white hover:scale-110 transition"><X className="h-4 w-4" /></button>
+                  <button onClick={() => respond(c, true)} aria-label={`Accept friend request from ${p?.full_name ?? "user"}`} className="grid h-9 w-9 place-items-center rounded-full bg-success text-white hover:scale-110 transition"><Check className="h-4 w-4" /></button>
+                  <button onClick={() => respond(c, false)} aria-label={`Decline friend request from ${p?.full_name ?? "user"}`} className="grid h-9 w-9 place-items-center rounded-full bg-destructive text-white hover:scale-110 transition"><X className="h-4 w-4" /></button>
                 </li>
               );
             })}

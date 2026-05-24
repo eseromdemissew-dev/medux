@@ -7,7 +7,16 @@ import { AuthShell } from "@/components/AuthShell";
 import { Loader2, Mail, Lock } from "lucide-react";
 
 export const Route = createFileRoute("/login")({
-  head: () => ({ meta: [{ title: "Sign in — Medux" }] }),
+  head: () => ({
+    meta: [
+      { title: "Sign in — Medux" },
+      { name: "description", content: "Sign in to your Medux account to start video and voice calls with your contacts." },
+      { property: "og:title", content: "Sign in — Medux" },
+      { property: "og:description", content: "Sign in to your Medux account to start video and voice calls with your contacts." },
+      { property: "og:url", content: "https://meduxconnect.lovable.app/login" },
+    ],
+    links: [{ rel: "canonical", href: "https://meduxconnect.lovable.app/login" }],
+  }),
   component: LoginPage,
 });
 
@@ -47,13 +56,15 @@ function LoginPage() {
       </div>
       <form onSubmit={handleEmail} className="space-y-3">
         <div className="relative">
-          <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Mail aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com"
+            aria-label="Email address"
             className="w-full rounded-xl bg-input/50 px-10 py-3 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary" />
         </div>
         <div className="relative">
-          <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Lock aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password"
+            aria-label="Password"
             className="w-full rounded-xl bg-input/50 px-10 py-3 text-sm outline-none ring-1 ring-border focus:ring-2 focus:ring-primary" />
         </div>
         <button disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-xl gradient-brand px-4 py-3 text-sm font-semibold text-white shadow-glow transition hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60">
