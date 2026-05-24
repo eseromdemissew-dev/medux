@@ -429,32 +429,32 @@ function CallScreen() {
       <AnimatePresence>
         <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
           className="absolute bottom-6 left-1/2 z-30 -translate-x-1/2 flex items-center gap-2 rounded-full bg-black/60 px-3 py-3 backdrop-blur shadow-glow">
-          <button onClick={toggleMute} title="Mute" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${muted ? "bg-destructive" : "bg-white/10"}`}>
+          <button onClick={toggleMute} title="Mute" aria-label="Mute" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${muted ? "bg-destructive" : "bg-white/10"}`}>
             {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
           </button>
           {call.type === "video" && (
             <>
-              <button onClick={toggleCam} title="Camera" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${camOff ? "bg-destructive" : "bg-white/10"}`}>
+              <button onClick={toggleCam} title="Camera" aria-label="Camera" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${camOff ? "bg-destructive" : "bg-white/10"}`}>
                 {camOff ? <VideoOff className="h-5 w-5" /> : <VideoIcon className="h-5 w-5" />}
               </button>
-              <button onClick={shareScreen} title="Share screen" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
+              <button onClick={shareScreen} title="Share screen" aria-label="Share screen" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
                 <Monitor className="h-5 w-5" />
               </button>
             </>
           )}
-          <button onClick={() => setSubtitlesOn((v) => !v)} title="Live subtitles + Amharic" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${subtitlesOn ? "bg-primary" : "bg-white/10"}`}>
+          <button onClick={() => setSubtitlesOn((v) => !v)} title="Live subtitles + Amharic" aria-label="Live subtitles + Amharic" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${subtitlesOn ? "bg-primary" : "bg-white/10"}`}>
             <Languages className="h-5 w-5" />
           </button>
-          <button onClick={() => setShowAI((v) => !v)} title="Medux AI" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${showAI ? "bg-primary" : "bg-white/10"}`}>
+          <button onClick={() => setShowAI((v) => !v)} title="Medux AI" aria-label="Medux AI" className={`grid h-12 w-12 place-items-center rounded-full transition hover:scale-110 ${showAI ? "bg-primary" : "bg-white/10"}`}>
             <Sparkles className="h-5 w-5" />
           </button>
-          <button onClick={() => setShowInvite(true)} title="Invite" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
+          <button onClick={() => setShowInvite(true)} title="Invite" aria-label="Invite" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
             <LinkIcon className="h-5 w-5" />
           </button>
-          <button onClick={() => document.documentElement.requestFullscreen?.()} title="Fullscreen" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
+          <button onClick={() => document.documentElement.requestFullscreen?.()} title="Fullscreen" aria-label="Fullscreen" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 hover:scale-110 transition">
             <Maximize className="h-5 w-5" />
           </button>
-          <button onClick={endCall} title="End" className="grid h-14 w-14 place-items-center rounded-full bg-destructive shadow-glow hover:scale-110 transition">
+          <button onClick={endCall} title="End" aria-label="End" className="grid h-14 w-14 place-items-center rounded-full bg-destructive shadow-glow hover:scale-110 transition">
             <PhoneOff className="h-6 w-6" />
           </button>
         </motion.div>
