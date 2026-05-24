@@ -6,11 +6,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { fmtDuration, initials, Ringtone } from "@/lib/medux";
 import { MeduxLogo } from "@/components/MeduxLogo";
-import { joinCall } from "@/lib/calls.functions";
+import { joinCall, decideJoinRequest } from "@/lib/calls.functions";
 import { askMeduxAI, translateToAmharic } from "@/lib/ai.functions";
 import {
   Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, Phone, Monitor, Maximize,
-  Copy, Link as LinkIcon, Sparkles, Languages, X, Send,
+  Copy, Link as LinkIcon, Sparkles, Languages, X, Send, UserCheck, UserX,
 } from "lucide-react";
 
 export const Route = createFileRoute("/call/$callId")({
@@ -60,6 +60,9 @@ function CallScreen() {
   const ringtoneRef = useRef<Ringtone | null>(null);
   const timerRef = useRef<number | null>(null);
   const speechRef = useRef<SpeechRecognition | null>(null);
+  const [joinRequests, setJoinRequests] = useState<{ id: string; user_id: string; profile?: Profile }[]>([]);
+
+  const isHost = !!user && !!call && (user.id === (call.host_id ?? call.initiator_id));
 
   const isInitiator = !!user && !!call && user.id === call.initiator_id;
   const incoming = !!call && !call.is_group && !isInitiator && call.status === "ringing";
@@ -98,6 +101,42 @@ function CallScreen() {
     return () => { supabase.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [call?.id]);
+
+  // Host: subscribe to pending join requests for this call
+  useEffect(() => {
+    if (!call || !user || !isHost) return;
+    const cjr = supabase.from("call_join_requests" as never) as unknown as {
+      select: (s: string) => { eq: (k: string, v: string) => { eq: (k: string, v: string) => Promise<{ data: { id: string; user_id: string }[] | null }> } };
+    };
+    const loadPending = async () => {
+      const { data } = await cjr.select("id, user_id").eq("call_id", call.id).eq("status", "pending");
+      const rows = (data ?? []) as { id: string; user_id: string }[];
+      if (rows.length === 0) { setJoinRequests([]); return; }
+      const { data: profs } = await supabase.from("profiles")
+        .select("id, full_name, avatar_url").in("id", rows.map((r) => r.user_id));
+      const pmap: Record<string, Profile> = {};
+      (profs as Profile[] | null)?.forEach((p) => (pmap[p.id] = p));
+      setJoinRequests(rows.map((r) => ({ ...r, profile: pmap[r.user_id] })));
+    };
+    loadPending();
+    const ch = supabase.channel(`call-knock-${call.id}`)
+      .on("postgres_changes", {
+        event: "*", schema: "public", table: "call_join_requests",
+        filter: `call_id=eq.${call.id}`,
+      }, () => { loadPending(); })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [call, user, isHost]);
+
+  async function admit(reqId: string, approve: boolean) {
+    try {
+      await decideJoinRequest({ data: { requestId: reqId, approve } });
+      setJoinRequests((prev) => prev.filter((r) => r.id !== reqId));
+      toast.success(approve ? "Admitted" : "Denied");
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
 
   const cleanup = useCallback(() => {
     ringtoneRef.current?.stop();
