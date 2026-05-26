@@ -51,7 +51,7 @@ function AppLayout() {
   }, [user]);
 
   useEffect(() => {
-    import("@/lib/push.client").then(({ registerServiceWorker, enablePushNotifications }) => {
+    import("@/lib/push").then(({ registerServiceWorker, enablePushNotifications }) => {
       registerServiceWorker().then(async () => {
         if (typeof window === "undefined") return;
         if ("Notification" in window && Notification.permission === "granted") {
@@ -68,7 +68,7 @@ function AppLayout() {
   async function enablePush() {
     const { vapidPublicKey } = await getPushConfig();
     if (!vapidPublicKey) { toast.error("Push not configured"); return; }
-    const { enablePushNotifications } = await import("@/lib/push.client");
+    const { enablePushNotifications } = await import("@/lib/push");
     const ok = await enablePushNotifications(vapidPublicKey);
     if (ok) { setPushReady(true); toast.success("Push notifications enabled"); }
     else toast.error("Permission denied or not supported");
