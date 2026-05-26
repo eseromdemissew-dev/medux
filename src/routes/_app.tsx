@@ -51,7 +51,7 @@ function AppLayout() {
   }, [user]);
 
   useEffect(() => {
-    import("@/lib/push.client").then(({ registerServiceWorker, enablePushNotifications }) => {
+    import("@/lib/push").then(({ registerServiceWorker, enablePushNotifications }) => {
       registerServiceWorker().then(async () => {
         if (typeof window === "undefined") return;
         if ("Notification" in window && Notification.permission === "granted") {
